@@ -1,0 +1,11 @@
+==================================================
+       FACTURA DE CUSTOS & DESPESAS OPERACIONAIS  
+          SALÃO DE FESTAS PAIXÃO E FILHOS         
+==================================================
+Data de Lançamento: 09/09/2026 20:05
+Atividade Ref:       REG-20260909-9022
+--------------------------------------------------
+Descrição Custo:     balao
+Valor Pago:          25,000.00 KZ
+==================================================
+Armazenada com sucesso no controlo interno.
