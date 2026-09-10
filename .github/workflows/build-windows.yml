@@ -24,7 +24,7 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --windowed --name SalaoPaixao sistema_19.py
+          pyinstaller --onefile --windowed --name SalaoPaixao --add-data "logo.png;." sistema_19.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4

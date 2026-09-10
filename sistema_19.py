@@ -4,6 +4,7 @@ import random
 import os
 import subprocess
 import webbrowser
+import sys
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -18,8 +19,34 @@ try:
     MATPLOTLIB_DISPONIVEL = True
 except ImportError:
     MATPLOTLIB_DISPONIVEL = False
+    
+def resource_path(relative_path):
+    """Obtém o caminho correto dos recursos no desenvolvimento e no executável."""
+    if getattr(sys, "frozen", False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
+
+
+try:
+    import matplotlib
+    matplotlib.use("TkAgg")
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+    import matplotlib.ticker as mticker
+    MATPLOTLIB_DISPONIVEL = True
+except ImportError:
+    MATPLOTLIB_DISPONIVEL = False
 
 class SistemaSalaoPaixaoFilhos:
+    
+ 
+    
+    
+    
+    
     def __init__(self, root):
         self.root = root
         self.root.title("Salão de Festas Paixão e Filhos - Sistema de Gestão & Controlo Financeiro")
@@ -266,7 +293,7 @@ class SistemaSalaoPaixaoFilhos:
         self.logo_img = None
         self.logo_img_login = None
         try:
-            img_original = tk.PhotoImage(file="logo.png")
+            img_original = tk.PhotoImage(file=resource_path("logo.png"))
             w, h = img_original.width(), img_original.height()
 
             # Versao para sidebar (largura max 150px)
