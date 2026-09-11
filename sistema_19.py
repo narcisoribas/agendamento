@@ -78,7 +78,13 @@ class SistemaSalaoPaixaoFilhos:
 
     def inicializar_bd(self):
         """Cria e atualiza a estrutura de tabelas relacionais com controlo de cargos"""
-        self.conn = sqlite3.connect("salao_paixao_filhos.db")
+        # Caminho da base de dados — funciona em desenvolvimento e em executavel
+        if getattr(sys, "frozen", False):
+            bd_dir = os.path.dirname(sys.executable)
+        else:
+            bd_dir = os.path.dirname(os.path.abspath(__file__))
+        bd_path = os.path.join(bd_dir, "salao_paixao_filhos.db")
+        self.conn = sqlite3.connect(bd_path)
         self.cursor = self.conn.cursor()
         
         # Habilitar suporte a chaves estrangeiras no SQLite
