@@ -114,7 +114,8 @@ class SistemaSalaoPaixaoFilhos:
                 data TEXT, 
                 valor_total REAL, 
                 responsavel TEXT,
-                num_convidados INTEGER
+                num_convidados INTEGER,
+                data_criacao TEXT
             )
         """)
         
@@ -127,6 +128,7 @@ class SistemaSalaoPaixaoFilhos:
                 descricao TEXT, 
                 valor REAL, 
                 data TEXT,
+                data_criacao TEXT,
                 FOREIGN KEY (reserva_id) REFERENCES reservas(id) ON DELETE CASCADE
             )
         """)
@@ -1018,6 +1020,83 @@ class SistemaSalaoPaixaoFilhos:
                 y += 7
             y += 5
 
+        # Gerar e inserir graficos no PDF
+        import tempfile
+        import matplotlib
+        matplotlib.use("Agg")
+        from matplotlib.figure import Figure
+
+        graficos_data = [
+            ("Receita vs Despesa Mensal", "receita_mensal", "despesa_mensal"),
+            ("Distribuicao por Evento", "eventos_distribuicao", None),
+            ("Pacotes Mais Reservados", "pacotes_popularidade", None),
+        ]
+
+        temp_files = []
+        for titulo, chave1, chave2 in graficos_data:
+            fig = Figure(figsize=(7, 3.5), dpi=150, facecolor='#2D2127')
+            ax = fig.add_subplot(111)
+            ax.set_facecolor('#2D2127')
+
+            if chave2 and dados.get(chave1) and dados.get(chave2):
+                meses = dados.get("meses_labels", [])
+                x = range(len(meses))
+                ax.plot(x, dados[chave1], color='#F472B6', linewidth=2, marker='o', markersize=4, label='Receita')
+                ax.fill_between(x, dados[chave1], alpha=0.15, color='#F472B6')
+                ax.plot(x, dados[chave2], color='#EF4444', linewidth=2, marker='s', markersize=3, label='Despesa', linestyle='--')
+                ax.set_xticks(list(x))
+                ax.set_xticklabels(meses, fontsize=7, color='#CCCCCC')
+                ax.tick_params(axis='y', colors='#CCCCCC', labelsize=7)
+                ax.legend(fontsize=7, facecolor='#3D2E36', edgecolor='#444', labelcolor='#CCCCCC')
+                ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f'{v/1000:.0f}K' if v >= 1000 else f'{v:.0f}'))
+            elif chave2 is None and dados.get(chave1):
+                items = dados[chave1]
+                if items:
+                    if isinstance(items[0], tuple) and len(items[0]) == 2:
+                        labels = [i[0][:15] for i in items[:8]]
+                        valores = [i[1] for i in items[:8]]
+                        cores = ['#F472B6', '#DB2777', '#A855F7', '#3B82F6', '#F59E0B', '#10B981', '#EF4444', '#64748B']
+                        if titulo.startswith("Distribuicao"):
+                            wedges, texts, autotexts = ax.pie(valores, labels=labels, autopct='%1.0f%%',
+                                                               colors=cores[:len(labels)], textprops={'fontsize': 6, 'color': '#CCCCCC'})
+                            for at in autotexts:
+                                at.set_fontsize(5)
+                                at.set_color('#FFFFFF')
+                        else:
+                            barras = ax.barh(labels, valores, color=cores[:len(labels)], height=0.6)
+                            for barra, val in zip(barras, valores):
+                                ax.text(barra.get_width() + 0.1, barra.get_y() + barra.get_height()/2,
+                                        str(val), va='center', fontsize=7, color='#CCCCCC', fontweight='bold')
+                            ax.invert_yaxis()
+                            ax.tick_params(axis='x', colors='#CCCCCC', labelsize=7)
+                            ax.tick_params(axis='y', colors='#CCCCCC', labelsize=7)
+                            ax.grid(axis='x', alpha=0.2, color='#666')
+
+            for spine in ax.spines.values():
+                spine.set_color('#444')
+            ax.set_title(titulo, fontsize=10, color='#FFFFFF', fontweight='bold', pad=8)
+            fig.tight_layout(pad=1)
+
+            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            fig.savefig(tmp.name, dpi=150, bbox_inches='tight', facecolor='#2D2127')
+            temp_files.append(tmp.name)
+            matplotlib.pyplot.close(fig)
+
+            # Verificar se ha espaco na pagina
+            if y + 80 > 270:
+                pdf.add_page()
+                y = 15
+
+            pdf.image(tmp.name, x=10, y=y, w=190)
+            y += 82
+
+        # Limpar ficheiros temporarios
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except:
+                pass
+
         # Rodape
         y += 5
         pdf.set_xy(10, y)
@@ -1670,36 +1749,29 @@ class SistemaSalaoPaixaoFilhos:
         cor_resultado = "#10B981" if resultado_diferenca >= 0 else "#EF4444"
         tk.Label(frame_balanco_caixa, text=f"Lucro / Diferenca Real: {resultado_diferenca:.2f} KZ", font=("Helvetica", 12, "bold"), fg=cor_resultado, bg=self.COR_CARD).pack(side="right", padx=15)
 
-        # Formulario de registo de despesas - Linha 1: campos
+        # Formulario de registo de despesas
         form_fin = tk.Frame(self.conteudo, bg=self.COR_CARD, padx=15, pady=15)
         form_fin.pack(fill="x", pady=10)
-        
+
         self.inputs_fin = {}
-        
-        # Linha 1: Vincular Atividade + Descricao + Valor
-        linha1 = tk.Frame(form_fin, bg=self.COR_CARD)
-        linha1.pack(fill="x", pady=(0, 10))
-        
-        tk.Label(linha1, text="Vincular Atividade:", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).pack(side="left", padx=(0, 5))
-        self.cb_vinculo = ttk.Combobox(linha1, values=self.puxar_lista_reservas_combobox(), state="readonly", font=("Helvetica", 11), width=28)
-        self.cb_vinculo.pack(side="left", padx=(0, 15))
-        
-        tk.Label(linha1, text="Descricao Gasto:", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).pack(side="left", padx=(0, 5))
-        ent_fin_desc = tk.Entry(linha1, font=("Helvetica", 11), bg=self.COR_BG, fg="white", bd=0, width=22)
-        ent_fin_desc.pack(side="left", padx=(0, 15))
-        self.inputs_fin["desc"] = ent_fin_desc
-        
-        tk.Label(linha1, text="Valor Saida (KZ):", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).pack(side="left", padx=(0, 5))
-        ent_fin_val = tk.Entry(linha1, font=("Helvetica", 11), bg=self.COR_BG, fg="white", bd=0, width=15)
-        ent_fin_val.pack(side="left", padx=(0, 15))
-        self.inputs_fin["valor"] = ent_fin_val
-        
-        # Linha 2: Botao centralizado
-        linha2 = tk.Frame(form_fin, bg=self.COR_CARD)
-        linha2.pack(fill="x")
-        
-        frame_saida = tk.Frame(linha2, bg=self.COR_MAGENTA, cursor="hand2")
-        frame_saida.pack(ipady=4, padx=10)
+
+        # Linha 1: Vincular Atividade
+        tk.Label(form_fin, text="Vincular Atividade:", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.cb_vinculo = ttk.Combobox(form_fin, values=self.puxar_lista_reservas_combobox(), state="readonly", font=("Helvetica", 11), width=30)
+        self.cb_vinculo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+        # Linha 2: Descricao e Valor
+        tk.Label(form_fin, text="Descricao Gasto:", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.inputs_fin["desc"] = tk.Entry(form_fin, font=("Helvetica", 11), bg=self.COR_BG, fg="white", bd=0, width=30)
+        self.inputs_fin["desc"].grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        tk.Label(form_fin, text="Valor Saida (KZ):", fg=self.COR_TEXTO, bg=self.COR_CARD, font=("Helvetica", 10, "bold")).grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        self.inputs_fin["valor"] = tk.Entry(form_fin, font=("Helvetica", 11), bg=self.COR_BG, fg="white", bd=0, width=15)
+        self.inputs_fin["valor"].grid(row=1, column=3, padx=5, pady=5, sticky="w")
+
+        # Botao Registar Saida (centralizado abaixo)
+        frame_saida = tk.Frame(form_fin, bg=self.COR_MAGENTA, cursor="hand2")
+        frame_saida.grid(row=2, column=0, columnspan=4, pady=15, ipady=5)
         lbl_saida = tk.Label(frame_saida, text="   Registar Saida   ", font=("Helvetica", 11, "bold"),
                              fg="white", bg=self.COR_MAGENTA, padx=20)
         lbl_saida.pack()
@@ -1748,6 +1820,10 @@ class SistemaSalaoPaixaoFilhos:
                 reserva_id = int(partes[0])
                 num_registo_ref = partes[1]
                 val = float(val_str)
+
+                if val <= 0:
+                    messagebox.showerror("Erro", "O valor da despesa deve ser maior que zero.")
+                    return
                 
                 # Grava a saída na tabela financeira
                 self.cursor.execute(
@@ -2215,17 +2291,194 @@ class SistemaSalaoPaixaoFilhos:
         pdf.output(caminho_completo)
         return caminho_completo
 
+    def _gerar_recibo_aluguer_pdf(self, numero, cliente, data_inicio, data_devolucao, itens, total, responsavel):
+        """Gera recibo de aluguer em PDF"""
+        from fpdf import FPDF
+
+        data_emissao = datetime.now().strftime("%d/%m/%Y")
+        hora_emissao = datetime.now().strftime("%H:%M")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        taxa_iva = 0.14
+        valor_sem_iva = total / (1 + taxa_iva)
+        valor_iva = total - valor_sem_iva
+
+        pasta = self._obter_pasta_downloads()
+        nome_ficheiro = f"Recibo_Aluguer_{numero}_{timestamp}.pdf"
+        caminho_completo = os.path.join(pasta, nome_ficheiro)
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_font("Helvetica", "B", 10)
+
+        # --- CABECALHO ---
+        pdf.set_fill_color(219, 39, 119)
+        pdf.rect(10, 10, 190, 35, "F")
+
+        logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+        if os.path.exists(logo_path):
+            pdf.image(logo_path, x=12, y=12, w=15, h=15)
+            txt_x = 30
+            txt_w = 170
+        else:
+            txt_x = 10
+            txt_w = 190
+
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_xy(txt_x, 12)
+        pdf.cell(txt_w, 10, "PAIXAO E FILHOS", align="C")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_xy(txt_x, 23)
+        pdf.cell(txt_w, 5, "Salao de Festas & Eventos", align="C")
+        pdf.set_xy(txt_x, 29)
+        pdf.cell(txt_w, 5, "Luanda, Angola", align="C")
+        pdf.set_xy(txt_x, 35)
+        pdf.cell(txt_w, 5, "NIF: 5419573961 | Tel: +244 923 456 789", align="C")
+
+        y_apos_cabecalho = 48
+
+        # --- DADOS DO DOCUMENTO ---
+        pdf.set_xy(10, y_apos_cabecalho)
+        pdf.set_text_color(51, 51, 51)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(95, 6, f"Nr. Recibo: {numero}")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(16, 185, 129)
+        pdf.set_xy(110, y_apos_cabecalho)
+        pdf.cell(90, 6, "COMPROVATIVO DE ALUGUER", align="R")
+
+        pdf.set_xy(10, y_apos_cabecalho + 6)
+        pdf.set_text_color(51, 51, 51)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(95, 6, f"Data Emissao: {data_emissao}")
+
+        pdf.set_xy(10, y_apos_cabecalho + 12)
+        pdf.cell(95, 6, f"Hora: {hora_emissao}")
+
+        # --- TIPO DE DOCUMENTO ---
+        y_documento = y_apos_cabecalho + 22
+        pdf.set_xy(10, y_documento)
+        pdf.set_fill_color(16, 185, 129)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(190, 10, "RECIBO DE ALUGUER", align="C", fill=True)
+
+        # --- DADOS DO CLIENTE ---
+        y_cliente = y_documento + 14
+        pdf.set_xy(10, y_cliente)
+        pdf.set_fill_color(209, 250, 229)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(51, 51, 51)
+        pdf.cell(190, 7, "  DADOS DO CLIENTE", fill=True)
+
+        y_valores = y_cliente + 9
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_xy(10, y_valores)
+        pdf.cell(95, 6, f"  Nome: {cliente}")
+        pdf.set_xy(10, y_valores + 6)
+        pdf.cell(95, 6, f"  Data Inicio: {data_inicio}")
+        pdf.set_xy(10, y_valores + 12)
+        pdf.cell(95, 6, f"  Data Devolucao: {data_devolucao or 'N/A'}")
+        pdf.set_xy(10, y_valores + 18)
+        pdf.cell(95, 6, f"  Func. Responsavel: {responsavel}")
+
+        # --- ITENS ALUGADOS ---
+        y_servico = y_valores + 28
+        pdf.set_xy(10, y_servico)
+        pdf.set_fill_color(209, 250, 229)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(190, 7, "  ITENS ALUGADOS", fill=True)
+
+        y_tabela = y_servico + 9
+        pdf.set_xy(10, y_tabela)
+        pdf.set_fill_color(16, 185, 129)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(80, 7, "  Descricao", border=1, fill=True)
+        pdf.cell(30, 7, "Qtd", border=1, align="C", fill=True)
+        pdf.cell(40, 7, "Preco Unit. (KZ)", border=1, align="C", fill=True)
+        pdf.cell(40, 7, "Total (KZ)", border=1, align="C", fill=True)
+
+        y_linha = y_tabela + 7
+        pdf.set_text_color(51, 51, 51)
+        pdf.set_font("Helvetica", "", 9)
+        for nome, qtd, valor_unit, valor_total_item in itens:
+            pdf.set_xy(10, y_linha)
+            pdf.cell(80, 7, f"  {nome}", border=1)
+            pdf.cell(30, 7, str(qtd), border=1, align="C")
+            pdf.cell(40, 7, f"{valor_unit:,.0f}", border=1, align="C")
+            pdf.cell(40, 7, f"{valor_total_item:,.0f}", border=1, align="C")
+            y_linha += 7
+
+        # Linhas vazias para preencher
+        for _ in range(max(0, 3 - len(itens))):
+            pdf.set_xy(10, y_linha)
+            pdf.cell(80, 7, "", border=1)
+            pdf.cell(30, 7, "", border=1)
+            pdf.cell(40, 7, "", border=1)
+            pdf.cell(40, 7, "", border=1)
+            y_linha += 7
+
+        # --- TOTAIS ---
+        y_totais = y_linha + 7
+        pdf.set_xy(110, y_totais)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(51, 51, 51)
+        pdf.cell(40, 6, "Sub-Total:", align="R")
+        pdf.cell(40, 6, f"{valor_sem_iva:,.2f} KZ", align="R")
+
+        pdf.set_xy(110, y_totais + 7)
+        pdf.cell(40, 6, "IVA (14%):", align="R")
+        pdf.cell(40, 6, f"{valor_iva:,.2f} KZ", align="R")
+
+        pdf.set_xy(110, y_totais + 16)
+        pdf.set_fill_color(16, 185, 129)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(40, 8, "TOTAL:", align="R", fill=True)
+        pdf.cell(40, 8, f"{total:,.0f} KZ", align="R", fill=True)
+
+        # --- NOTAS ---
+        y_notas = y_totais + 32
+        pdf.set_xy(10, y_notas)
+        pdf.set_text_color(102, 102, 102)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(190, 5, "Este recibo comprova o aluguer dos itens acima indicados.")
+        pdf.set_xy(10, y_notas + 5)
+        pdf.cell(190, 5, "O IVA e liquidado a taxa de 14% conforme legislacao vigente.")
+
+        # --- RODAPE ---
+        y_rodape = y_notas + 16
+        pdf.set_xy(10, y_rodape)
+        pdf.set_draw_color(16, 185, 129)
+        pdf.line(10, y_rodape, 200, y_rodape)
+        pdf.set_xy(10, y_rodape + 3)
+        pdf.set_text_color(16, 185, 129)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(190, 5, "Obrigado pela preferencia!", align="C")
+        pdf.set_xy(10, y_rodape + 9)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(102, 102, 102)
+        pdf.cell(190, 5, "Salao Paixao e Filhos - celebrando consigo.", align="C")
+        pdf.set_xy(10, y_rodape + 14)
+        pdf.cell(190, 5, f"Documento gerado em {data_emissao} as {hora_emissao}", align="C")
+
+        pdf.output(caminho_completo)
+        return caminho_completo
+
     def _enviar_para_impressora(self, caminho_pdf):
-        """Envia o PDF para a impressora padrao do sistema"""
+        """Envia o PDF para a impressora padrao do sistema ou abre no visualizador."""
         try:
             if os.name == 'nt':  # Windows
                 os.startfile(caminho_pdf, "print")
-            elif os.name == 'posix':  # macOS
-                subprocess.Popen(['lpr', caminho_pdf])
-            messagebox.showinfo("Impressao", "Documento enviado para a impressora!")
+            elif os.name == 'posix':  # macOS/Linux
+                subprocess.Popen(['open', caminho_pdf])
+            messagebox.showinfo("Impressao", "Documento aberto no visualizador para impressao.")
         except Exception as e:
             messagebox.showerror("Erro de Impressao",
-                                 f"Nao foi possivel enviar para a impressora.\nO PDF foi guardado em:\n{caminho_pdf}")
+                                 f"Nao foi possivel abrir o documento.\nO PDF foi guardado em:\n{caminho_pdf}")
 
     # =====================================================================
     # MODULO DE PATRIMONIO
@@ -2390,6 +2643,12 @@ class SistemaSalaoPaixaoFilhos:
         self.tv_pat.column("Nome", width=150)
         self.tv_pat.pack(fill="both", expand=True, pady=10)
         self.tv_pat.bind("<<TreeviewSelect>>", lambda e: self._selecionar_patrimonio())
+
+        # Botao Ver Detalhes — sempre visivel
+        frame_pat_acao = tk.Frame(self.conteudo, bg=self.COR_BG)
+        frame_pat_acao.pack(fill="x", pady=3)
+        self._criar_botao(frame_pat_acao, "Ver Detalhes", self._ver_detalhes_patrimonio, bg="#8B5CF6")
+
         self._atualizar_tabela_patrimonio()
 
     def _limpar_form_patrimonio(self):
@@ -2508,6 +2767,114 @@ class SistemaSalaoPaixaoFilhos:
         self.ent_pat_desc.insert(0, p[2] or "")
         self.ent_pat_local.insert(0, p[8] or "")
         self.lbl_pat_registar.config(text="Guardar")
+
+    def _ver_detalhes_patrimonio(self):
+        """Abre janela de detalhes do patrimonio selecionado"""
+        sel = self.tv_pat.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecione um patrimonio na tabela.")
+            return
+        vals = self.tv_pat.item(sel[0], "values")
+        codigo = vals[0]
+
+        p = self.cursor.execute(
+            "SELECT id, codigo, nome, descricao, quantidade_total, quantidade_disponivel, "
+            "quantidade_alugada, quantidade_manutencao, estado_fisico, situacao_operacional, "
+            "valor_aquisicao, localizacao, data_aquisicao, created_at FROM patrimonio WHERE codigo=?",
+            (codigo,)
+        ).fetchone()
+        if not p:
+            return
+
+        pat_id = p[0]
+
+        janela = tk.Toplevel(self.root)
+        janela.title(f"Detalhes - {p[2]}")
+        janela.geometry("600x500")
+        janela.configure(bg=self.COR_BG)
+        janela.transient(self.root)
+        janela.grab_set()
+
+        canvas = tk.Canvas(janela, bg=self.COR_BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(janela, orient="vertical", command=canvas.yview)
+        frame = tk.Frame(canvas, bg=self.COR_BG)
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        tk.Label(frame, text=f"Detalhes do Patrimonio", font=("Helvetica", 14, "bold"),
+                 fg="#FFFFFF", bg=self.COR_BG).pack(pady=(10, 5))
+
+        # Dados Gerais
+        f_gerais = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_gerais.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_gerais, text="Dados Gerais", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+        dados = [
+            ("Codigo:", p[1]),
+            ("Nome:", p[2]),
+            ("Descricao:", p[3] or "N/A"),
+            ("Localizacao:", p[11] or "N/A"),
+            ("Data Aquisicao:", p[12] or "N/A"),
+            ("Criado em:", p[13]),
+        ]
+        for lbl, val in dados:
+            linha = tk.Frame(f_gerais, bg=self.COR_CARD)
+            linha.pack(fill="x", pady=1)
+            tk.Label(linha, text=lbl, font=("Helvetica", 9, "bold"), fg="#CCCCCC", bg=self.COR_CARD, width=18, anchor="w").pack(side="left")
+            tk.Label(linha, text=val, font=("Helvetica", 9), fg="#FFFFFF", bg=self.COR_CARD, anchor="w").pack(side="left")
+
+        # Quantidades
+        f_qtd = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_qtd.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_qtd, text="Quantidades", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+        for lbl, val in [("Total:", str(p[4])), ("Disponivel:", str(p[5])), ("Alugada:", str(p[6])), ("Manutencao:", str(p[7]))]:
+            linha = tk.Frame(f_qtd, bg=self.COR_CARD)
+            linha.pack(fill="x", pady=1)
+            tk.Label(linha, text=lbl, font=("Helvetica", 9, "bold"), fg="#CCCCCC", bg=self.COR_CARD, width=18, anchor="w").pack(side="left")
+            tk.Label(linha, text=val, font=("Helvetica", 9), fg="#FFFFFF", bg=self.COR_CARD, anchor="w").pack(side="left")
+
+        # Estado e Valor
+        f_estado = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_estado.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_estado, text="Estado e Valor", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+        for lbl, val in [("Estado Fisico:", p[8]), ("Situacao Operacional:", p[9]), ("Valor Aquisicao:", f"{p[10]:,.0f} KZ" if p[10] else "N/A")]:
+            linha = tk.Frame(f_estado, bg=self.COR_CARD)
+            linha.pack(fill="x", pady=1)
+            tk.Label(linha, text=lbl, font=("Helvetica", 9, "bold"), fg="#CCCCCC", bg=self.COR_CARD, width=18, anchor="w").pack(side="left")
+            cor = "#10B981" if val == "DISPONIVEL" else "#F59E0B" if val in ("ALUGADO", "EM_USO") else "#EF4444" if val == "INDISPONIVEL" else "#FFFFFF"
+            tk.Label(linha, text=val, font=("Helvetica", 9), fg=cor, bg=self.COR_CARD, anchor="w").pack(side="left")
+
+        # Historico de alugueres
+        f_hist = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_hist.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_hist, text="Historico de Alugueres", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+
+        tv = ttk.Treeview(f_hist, columns=("Nr Aluguer", "Cliente", "Qtd", "Data", "Estado"), show="headings", height=4)
+        for col in tv["columns"]:
+            tv.heading(col, text=col)
+            tv.column(col, anchor="center", width=90)
+        tv.column("Nr Aluguer", width=100)
+        tv.pack(fill="x")
+
+        alugueres = self.cursor.execute(
+            "SELECT a.numero_aluguer, a.cliente, ai.quantidade, a.data_aluguer, a.estado "
+            "FROM aluguer_patrimonio_itens ai JOIN aluguer_patrimonio a ON ai.aluguer_id = a.id "
+            "WHERE ai.patrimonio_id = ? ORDER BY a.id DESC", (pat_id,)
+        ).fetchall()
+        for al in alugueres:
+            tv.insert("", "end", values=al)
+        if not alugueres:
+            tv.insert("", "end", values=("Sem alugueres registados", "", "", "", ""))
+
+        # Botao fechar
+        tk.Button(frame, text="Fechar", command=janela.destroy, font=("Helvetica", 10),
+                  bg="#64748B", fg="white", relief="flat", padx=20, pady=5).pack(pady=10)
 
     def _editar_patrimonio_selecionado(self):
         """Ativa modo edicao"""
@@ -2715,9 +3082,10 @@ class SistemaSalaoPaixaoFilhos:
         self.tv_alug.pack(fill="both", expand=True, pady=5)
         self.tv_alug.bind("<<TreeviewSelect>>", lambda e: self._selecionar_aluguer())
 
-        # Botoes de acao para alugueres
+        # Botoes de acao — sempre visiveis
         frame_b_alug_acao = tk.Frame(self.conteudo, bg=self.COR_BG)
         frame_b_alug_acao.pack(fill="x", pady=3)
+        self._criar_botao(frame_b_alug_acao, "Ver Detalhes", self._ver_detalhes_aluguer, bg="#8B5CF6")
         self._criar_botao(frame_b_alug_acao, "Registar Devolucao", self._abrir_devolucao_aluguer, bg="#F59E0B")
         self._criar_botao(frame_b_alug_acao, "Registar Pagamento", self._abrir_pagamento_aluguer, bg="#10B981")
         self._criar_botao(frame_b_alug_acao, "Cancelar Aluguer", self._cancelar_aluguer, bg="#EF4444")
@@ -2793,6 +3161,14 @@ class SistemaSalaoPaixaoFilhos:
             messagebox.showerror("Erro", "Formato de data invalido. Use DD/MM/AAAA.")
             return
 
+        # Validar que data de devolucao nao e anterior a data de inicio
+        if devolucao:
+            data_inicio_dt = datetime.strptime(inicio, "%d/%m/%Y")
+            data_devolucao_dt = datetime.strptime(devolucao, "%d/%m/%Y")
+            if data_devolucao_dt < data_inicio_dt:
+                messagebox.showerror("Erro", "A data de devolucao nao pode ser anterior a data de inicio.")
+                return
+
         numero = self._gerar_codigo_aluguer()
         agora = datetime.now().strftime("%d/%m/%Y %H:%M")
         total = sum(q * v for _, _, q, v, _ in self._aluguer_itens)
@@ -2834,6 +3210,21 @@ class SistemaSalaoPaixaoFilhos:
                                        f"Aluguer {numero} - {cliente}")
 
         self.conn.commit()
+
+        # Gerar recibo PDF
+        itens_recibo = [(nome, qtd, v, qtd * v) for _, nome, qtd, v, _ in self._aluguer_itens]
+        try:
+            caminho_recibo = self._gerar_recibo_aluguer_pdf(
+                numero, cliente, inicio, devolucao, itens_recibo, total, self.utilizador_atual
+            )
+            if messagebox.askyesno("Recibo Gerado", f"Recibo salvo em:\n{caminho_recibo}\n\nDeseja abrir?"):
+                if os.name == 'nt':
+                    os.startfile(caminho_recibo)
+                else:
+                    subprocess.Popen(['open', caminho_recibo])
+        except Exception as e:
+            messagebox.showwarning("Aviso", f"Aluguer criado, mas houve erro ao gerar recibo:\n{e}")
+
         messagebox.showinfo("Sucesso", f"Aluguer {numero} criado com sucesso!\nTotal: {total:,.0f} KZ")
         self._limpar_form_aluguer()
         self._atualizar_tabela_alugueres()
@@ -2852,7 +3243,156 @@ class SistemaSalaoPaixaoFilhos:
 
     def _selecionar_aluguer(self):
         """Seleciona aluguer na tabela"""
-        pass  # Acao opcional
+        pass
+
+    def _ver_detalhes_aluguer(self):
+        """Abre janela de detalhes do aluguer selecionado"""
+        sel = self.tv_alug.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecione um aluguer na tabela.")
+            return
+        vals = self.tv_alug.item(sel[0], "values")
+        numero = vals[0]
+
+        # Buscar dados completos do aluguer
+        alug = self.cursor.execute(
+            "SELECT id, numero_aluguer, cliente, data_aluguer, data_inicio, data_devolucao_prevista, "
+            "estado, valor_total, valor_pago, valor_pendente, observacoes, responsavel, "
+            "data_devolucao_efetiva, created_at FROM aluguer_patrimonio WHERE numero_aluguer=?",
+            (numero,)
+        ).fetchone()
+        if not alug:
+            return
+
+        alug_id = alug[0]
+
+        janela = tk.Toplevel(self.root)
+        janela.title(f"Detalhes - {numero}")
+        janela.geometry("650x550")
+        janela.configure(bg=self.COR_BG)
+        janela.transient(self.root)
+        janela.grab_set()
+
+        # Scrollable frame
+        canvas = tk.Canvas(janela, bg=self.COR_BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(janela, orient="vertical", command=canvas.yview)
+        frame = tk.Frame(canvas, bg=self.COR_BG)
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Titulo
+        tk.Label(frame, text=f"Detalhes do Aluguer {numero}", font=("Helvetica", 14, "bold"),
+                 fg="#FFFFFF", bg=self.COR_BG).pack(pady=(10, 5))
+
+        # Seccao: Dados Gerais
+        f_gerais = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_gerais.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_gerais, text="Dados Gerais", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+        dados = [
+            ("Nr. Aluguer:", alug[1]),
+            ("Cliente:", alug[2]),
+            ("Data Criacao:", alug[13]),
+            ("Data Inicio:", alug[4] or "N/A"),
+            ("Data Devolucao Prevista:", alug[5] or "N/A"),
+            ("Data Devolucao Real:", alug[12] or "N/A"),
+            ("Estado:", alug[6]),
+            ("Responsavel:", alug[11]),
+        ]
+        for lbl, val in dados:
+            linha = tk.Frame(f_gerais, bg=self.COR_CARD)
+            linha.pack(fill="x", pady=1)
+            tk.Label(linha, text=lbl, font=("Helvetica", 9, "bold"), fg="#CCCCCC", bg=self.COR_CARD, width=22, anchor="w").pack(side="left")
+            cor_estado = "#10B981" if val == "ATIVO" else "#F59E0B" if val == "DEVOLVIDO" else "#EF4444" if val == "CANCELADO" else "#FFFFFF"
+            tk.Label(linha, text=val, font=("Helvetica", 9), fg=cor_estado, bg=self.COR_CARD, anchor="w").pack(side="left")
+
+        # Seccao: Valores
+        f_valores = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_valores.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_valores, text="Valores", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+        for lbl, val in [("Valor Total:", f"{alug[7]:,.0f} KZ"), ("Valor Pago:", f"{alug[8]:,.0f} KZ"), ("Valor Pendente:", f"{alug[9]:,.0f} KZ")]:
+            linha = tk.Frame(f_valores, bg=self.COR_CARD)
+            linha.pack(fill="x", pady=1)
+            tk.Label(linha, text=lbl, font=("Helvetica", 9, "bold"), fg="#CCCCCC", bg=self.COR_CARD, width=22, anchor="w").pack(side="left")
+            tk.Label(linha, text=val, font=("Helvetica", 9), fg="#FFFFFF", bg=self.COR_CARD, anchor="w").pack(side="left")
+
+        # Seccao: Observacoes
+        if alug[10]:
+            f_obs = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+            f_obs.pack(fill="x", padx=10, pady=5)
+            tk.Label(f_obs, text="Observacoes", font=("Helvetica", 11, "bold"),
+                     fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+            tk.Label(f_obs, text=alug[10], font=("Helvetica", 9), fg="#CCCCCC", bg=self.COR_CARD, wraplength=580, justify="left").pack(anchor="w")
+
+        # Seccao: Itens Alugados
+        f_itens = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_itens.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_itens, text="Itens Alugados", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+
+        tv = ttk.Treeview(f_itens, columns=("Patrimonio", "Qtd", "Valor Unit.", "Total", "Estado Saida", "Qtd Devolvida"), show="headings", height=5)
+        for col in tv["columns"]:
+            tv.heading(col, text=col)
+            tv.column(col, anchor="center", width=85)
+        tv.column("Patrimonio", width=140)
+        tv.pack(fill="x")
+
+        itens = self.cursor.execute(
+            "SELECT p.nome, ai.quantidade, ai.valor_unitario, ai.valor_total, ai.estado_saida, ai.quantidade_devolvida "
+            "FROM aluguer_patrimonio_itens ai JOIN patrimonio p ON ai.patrimonio_id = p.id "
+            "WHERE ai.aluguer_id = ?", (alug_id,)
+        ).fetchall()
+        for it in itens:
+            tv.insert("", "end", values=it)
+
+        # Seccao: Historico de Pagamentos
+        f_pag = tk.Frame(frame, bg=self.COR_CARD, padx=12, pady=10)
+        f_pag.pack(fill="x", padx=10, pady=5)
+        tk.Label(f_pag, text="Historico de Pagamentos", font=("Helvetica", 11, "bold"),
+                 fg="#F472B6", bg=self.COR_CARD).pack(anchor="w")
+
+        tv_pag = ttk.Treeview(f_pag, columns=("Data", "Valor", "Metodo", "Funcionario"), show="headings", height=4)
+        for col in tv_pag["columns"]:
+            tv_pag.heading(col, text=col)
+            tv_pag.column(col, anchor="center", width=100)
+        tv_pag.column("Data", width=120)
+        tv_pag.pack(fill="x")
+
+        pagamentos = self.cursor.execute(
+            "SELECT data_pagamento, valor, forma_pagamento, responsavel "
+            "FROM aluguer_patrimonio_pagamentos WHERE aluguer_id = ? ORDER BY id", (alug_id,)
+        ).fetchall()
+        for pg in pagamentos:
+            tv_pag.insert("", "end", values=pg)
+        if not pagamentos:
+            tv_pag.insert("", "end", values=("Sem pagamentos registados", "", "", ""))
+
+        # Botoes de acao
+        f_botoes = tk.Frame(frame, bg=self.COR_BG)
+        f_botoes.pack(fill="x", pady=10)
+
+        def gerar_recibo():
+            try:
+                itens_recibo = [(it[0], it[1], it[2], it[3]) for it in itens]
+                caminho = self._gerar_recibo_aluguer_pdf(
+                    alug[1], alug[2], alug[4], alug[5], itens_recibo, alug[7], alug[11]
+                )
+                if messagebox.askyesno("Recibo Gerado", f"Recibo salvo em:\n{caminho}\n\nDeseja abrir?"):
+                    if os.name == 'nt':
+                        os.startfile(caminho)
+                    else:
+                        subprocess.Popen(['open', caminho])
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao gerar recibo:\n{e}")
+
+        tk.Button(f_botoes, text="Gerar Recibo", command=gerar_recibo, font=("Helvetica", 10),
+                  bg="#10B981", fg="white", relief="flat", padx=20, pady=5).pack(side="left", padx=5)
+        tk.Button(f_botoes, text="Fechar", command=janela.destroy, font=("Helvetica", 10),
+                  bg="#64748B", fg="white", relief="flat", padx=20, pady=5).pack(side="left", padx=5)
 
     def _atualizar_tabela_alugueres(self):
         """Atualiza tabela de alugueres"""
